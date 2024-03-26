@@ -1,0 +1,311 @@
+---
+title: "Case Study 1- DS 6306"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(readr)
+library(tools)
+library(sf)
+library(naniar)
+library(mice)
+library (class)
+
+```
+
+# Introduction
+
+| We have undertaken a comprehensive analysis of two important datasets that provide a detailed snapshot of the brewing industry. The first dataset encapsulates a wealth of information on 2,410 U.S. craft beers, covering aspects such as their alcohol by volume (ABV), International Bitterness Units (IBUs), and beer style. This data offers valuable insights into the popularity of various beer styles, the correlation between ABV and IBUs, and potential market trends. The second dataset provides records on 558 U.S. breweries, including their location and size. This dataset will allow us to understand geographical distribution, market saturation, and opportunities for expansion. By cross-referencing these datasets, we can identify patterns and trends that could inform Budweiser's strategic decisions. Our goal is to present these findings in a clear and impactful manner, focusing on the implications of the data rather than the technicalities of the analysis. We trust that these insights will contribute significantly to shaping Budweiser's future strategies. Thank you for your time, and we look forward to discussing our findings with you.
+
+```{r beers and breweries, message=FALSE}
+#Import and name each data set
+beers <- read.csv("https://github.com/torih1541/Case-Study-1-DDS/files/14513428/Beers.csv")
+breweries <- read.csv("https://github.com/torih1541/Case-Study-1-DDS/files/14513429/Breweries.csv")
+```
+
+#### How many breweries are present in each state?
+
+| The number of breweries present in each state, sorted by the states with the most breweries: Colorado (CO) - 47 breweries, California (CA) - 39 breweries, Michigan (MI) - 32 breweries, Oregon (OR) - 29 breweries, Texas (TX) - 28 breweries. The list continues with states having fewer breweries, all the way down to those with just one brewery, such as North Dakota (ND), South Dakota (SD), Washington D.C. (DC), and West Virginia (WV).
+| This list and map shows a strong presence of breweries in certain states, reflecting perhaps a robust craft beer culture in those locations.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+#Map state abbreviations to their full names
+state_map <- c(
+  "AL" = "Alabama", AK = "Alaska", AZ = "Arizona", AR = "Arkansas", CA = "California",
+  CO = "Colorado", CT = "Connecticut", DE = "Delaware", FL = "Florida", GA = "Georgia",
+  HI = "Hawaii", ID = "Idaho", IL = "Illinois", IN = "Indiana", IA = "Iowa",
+  KS = "Kansas", KY = "Kentucky", LA = "Louisiana", ME = "Maine", MD = "Maryland",
+  MA = "Massachusetts", MI = "Michigan", "MN" = "Minnesota", MS = "Mississippi", MO = "Missouri",
+  MT = "Montana", NE = "Nebraska", NV = "Nevada", NH = "New Hampshire", NJ = "New Jersey",
+  NM = "New Mexico", NY = "New York", NC = "North Carolina", ND = "North Dakota", OH = "Ohio",
+  OK = "Oklahoma", OR = "Oregon", PA = "Pennsylvania", RI = "Rhode Island", SC = "South Carolina",
+  SD = "South Dakota", TN = "Tennessee", TX = "Texas", UT = "Utah", VT = "Vermont",
+  VA = "Virginia", WA = "Washington", WV = "West Virginia", WI = "Wisconsin", WY = "Wyoming"
+)
+
+#Prepare breweries dataset 
+breweries <- breweries %>%
+  mutate(State = str_trim(State),
+         State = toupper(State), 
+         StateFullName = state_map[State])
+
+#Aggregate and count number of breweries by state
+breweries_by_state <- breweries %>%
+  group_by(StateFullName) %>%
+  summarise(NumberOfBreweries = n())
+
+#Load US states shapefile for mapping
+us_states <- st_read("https://github.com/erikadupond/ErikaDuPond.github.io/blob/main/States_shapefile.shp")
+
+#Merge the shapefile data with count data
+map_data1 <- merge(us_states, breweries_by_state, by.x= "NAME", by.y= "StateFullName", all.x = TRUE)
+
+#Create a map of the nummber of breweries by state
+ggplot(data = map_data1) +
+  geom_sf(aes(fill = NumberOfBreweries), color = "white") +
+  scale_fill_gradient(low = "lightblue", high = "darkblue", name = "Number of Breweries") +
+  labs(title = "Number of Breweries by State", x = "", y = "") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.15,size = 15),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        panel.grid = element_blank(),
+        panel.background = element_rect(color="white"),
+        legend.position = 'none',
+        plot.margin = unit(c(0, -25, -5, 0), "cm"),
+        plot.background = element_rect(color = "white")
+        ) + 
+        coord_sf(expand= FALSE, datum = NA)
+
+```
+
+#### Merge beer data with the breweries data. Print the first 6 observations and the last six observations to check the merged file.
+
+```{r echo=TRUE}
+# Merge the data frames on the Brewery_id (in beers) and Brew_id (in breweries)
+merged_data <- merge(beers, breweries, by.x = "Brewery_id", by.y = "Brew_ID")
+
+# Print the first 6 observations
+print(head(merged_data, 6))
+
+# Print the last 6 observations
+print(tail(merged_data, 6))
+```
+
+#### Address the missing values in each column.
+
+The missing ABV values could be missing if the brewery did not or chose not to measure ABV values for some beers and there does not seem to be certain types of beer more likely to be missing ABV so these are missing at random. The large number of missing IBU values could suggest measuring IBU is too expensive or time consuming so breweries would choose not to measure this leaving the values missing at random. We used MCAR test to create a heat map of the data missingness to determine patterns.
+
+```{r}
+# Little's MCAR test
+mcar_test <- mice::md.pattern(beers)
+
+summary(merged_data)
+
+#Create dataframe with no NA values to perform further analysis
+cleaned_data <- na.omit(merged_data)
+
+# Print the first 6 observations
+print(head(cleaned_data, 6))
+
+# Print the last 6 observations
+print(tail(cleaned_data, 6))
+```
+
+#### Compute the median alcohol content and international bitterness unit for each state. Plot a bar chart to compare.
+
+The bar charts visualize the median alcohol content (ABV) and international bitterness units (IBU) for each state. The first chart shows the median ABV, with states arranged in ascending order of their median ABV values, while the second chart displays the median IBU, again in ascending order. A dashed red line represents the overall median across all states for each metric, offering a reference point to easily compare which states fall above or below the overall median.
+
+These visualizations help identify patterns and outliers in beer characteristics across different states, potentially reflecting regional preferences or brewing styles.
+
+```{r}
+#Groups cleaned data by state and calculates median ABV and IBU
+medians_by_state <- cleaned_data %>%
+  group_by(State) %>%
+  summarise(Median_ABV = median(ABV, na.rm = TRUE),
+            Median_IBU = median(IBU, na.rm = TRUE))
+
+#Bar chart displaying the median ABV for each state
+ggplot(medians_by_state, aes(x = reorder(State, Median_ABV), y = Median_ABV)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_hline(yintercept = median(medians_by_state$Median_ABV, na.rm = TRUE), 
+             linetype = "dashed", color = "red") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "State", y = "Median ABV (%)", title = "Median Alcohol Content by State") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Bar chart displaying the median IBU for each state
+ggplot(medians_by_state, aes(x = reorder(State, Median_IBU), y = Median_IBU)) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  geom_hline(yintercept = median(medians_by_state$Median_IBU, na.rm = TRUE), 
+             linetype = "dashed", color = "red") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "State", y = "Median IBU", title = "Median IBU by State") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+#### Which state has the maximum alcoholic (ABV) beer? Which state has the most bitter (IBU) beer?
+
+```{r paged.print=TRUE}
+# Determine which state has the maximum ABV
+ state_with_max_ABV <- cleaned_data[which.max(cleaned_data$ABV),]$State
+ print(paste("The state with the maximum alcoholic (ABV) beer is", state_with_max_ABV))
+ # Determine which state has the maximum IBU
+state_with_max_IBU <- cleaned_data[which.max(cleaned_data$IBU),]$State
+print(paste("The state with the most bitter (IBU) beer is", state_with_max_IBU))
+
+#Calculate max ABV by state
+max_abv_by_state <- cleaned_data %>%
+  group_by(State) %>%
+  summarise(Max_ABV = max(ABV, na.rm = TRUE))
+
+#Calculate max IBU by state
+max_ibu_by_state <- cleaned_data %>%
+  group_by(State) %>%
+  summarise(Max_IBU = max(IBU, na.rm = TRUE))
+
+#Visualizing Maximum ABV by State
+ggplot(max_abv_by_state, aes(x = reorder(State, Max_ABV), y = Max_ABV, fill = State)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  geom_text(aes(label = round(Max_ABV, 2)), position = position_stack(vjust = 1.01), hjust = 0.5, size = 2) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  labs(x = "State", y = "Maximum ABV", title = "Maximum ABV by State")
+
+
+#Visualizing Maximum IBU by State
+ggplot(max_ibu_by_state, aes(x = reorder(State, Max_IBU), y = Max_IBU, fill = State)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  geom_text(aes(label = round(Max_IBU, 2)), position = position_stack(vjust = 1.01), hjust = 0.5, size = 2) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  labs(x = "State", y = "Maximum IBU", title = "Maximum IBU by State")
+
+```
+
+#### The summary statistics and distribution of the ABV variable
+
+Through an analysis of our beer dataset, we've identified key insights into the Alcohol by Volume (ABV) and International Bitterness Units (IBU). The ABV ranges from 0.1% to 12.8%, with the majority of beers sitting around 5.6%. However, the average ABV is slightly higher at 5.98%, indicating the presence of some significantly stronger beers. When it comes to bitterness as measured by IBUs, the median value is 35, but the mean is 42.71, showing that some beers have a considerably high bitterness level. A regional analysis highlights Kentucky as the producer of the beer with the highest ABV, while Oregon leads with the most bitter beer. It's important to note that these findings are based on our current dataset, and may not represent all beers. We also handled missing data points responsibly; specifically, 62 instances where the ABV was not recorded were excluded from the analysis. These insights could be valuable in shaping marketing strategies and understanding regional taste preferences.
+
+#### Is there an apparent relationship between the bitterness of the beer and its alcoholic content? Draw a scatter plot. Make your best judgment of a relationship and EXPLAIN your answer.
+
+The scatter plot below shows the relationship between beer bitterness (IBU) and alcoholic content (ABV) with a linear model fit. From the visualization, we observe a positive slope of the fitted line, indicating a general trend where beers with higher alcoholic content also tend to have higher bitterness levels. This implies a relationship where stronger beers often possess a higher level of bitterness. However, it's important to note the scatter around the fitted line, indicating variability in this relationship. Some beers with a high ABV might not have very high IBU values and vice versa. This variability could be due to different brewing styles, ingredients, and processes that impact the final ABV and IBU of beer independently.
+
+In summary, while there seems to be a general trend indicating a positive relationship between beer's alcoholic content and its bitterness, the relationship is not absolute, and exceptions are evident across the dataset. This highlights the complexity of beer brewing, where multiple factors influence the final product's characteristics. ​
+
+```{r}
+#Scatter plot of relationship between ABV and IBU
+ggplot(cleaned_data, aes(x = ABV, y = IBU)) +
+  geom_point(alpha = 0.5) +
+  theme_minimal() +
+  labs(x = "Alcohol By Volume (ABV)", 
+       y = "International Bitterness Units (IBU)", 
+       title = "Relationship between Beer Bitterness and Alcoholic Content") +
+  geom_smooth(method = "lm", se = FALSE, color = "blue")
+```
+
+#### Budweiser would also like to investigate the difference with respect to IBU and ABV between IPAs (India Pale Ales) and other types of Ale (any beer with “Ale” in its name other than IPA).  You decide to use KNN classification to investigate this relationship.  Provide statistical evidence one way or the other.
+
+To investigate the differences between IPAs AND Ales, we chose to use the KNN classification algorithm to investigate the relationship using the IBU and ABV data points. Here below, you will see the code explained as to how we filtered out the "IPA" and "Other Ale" categories and then ran the KNN function and then set up a confusion matrix. The last function calculates the accuracy of the data and how similar IPAs and Ales are. The functions come up with a percentage accuracy of 83.4% between IPAs and Other Ales based on the IBU and ABV data. 
+
+```{r}
+# Prepare the beers dataset
+beers <- beers %>%
+  filter(grepl("Ale", Style, ignore.case = TRUE) | grepl("IPA", Style, ignore.case = TRUE)) %>%
+  mutate(Category = ifelse(grepl("IPA", Style, ignore.case = TRUE), "IPA", "Other Ale"))
+
+# Remove missing values
+beers <- na.omit(beers)
+
+# Normalize the data
+beers$ABV <- scale(beers$ABV)
+beers$IBU <- scale(beers$IBU)
+
+# Prepare the data for the KNN classifier
+set.seed(5) 
+training_index <- sample(1:nrow(beers), 0.8*nrow(beers)) # 80% for training
+train <- beers[training_index,]
+test <- beers[-training_index,]
+
+# Train the KNN model
+knn_model <- knn(train = train[,c('ABV', 'IBU')], 
+                 test = test[,c('ABV', 'IBU')],
+                 cl = train$Category, 
+                 k = 5)
+
+# Validate the model
+knn_table <- table(Predicted = knn_model, Actual = test$Category)
+knn_table
+# Calculate the accuracy
+accuracy <- sum(knn_model == test$Category) / length(knn_model)
+accuracy 
+
+# Scatter plot for ABV vs IBU with color-coding for beer types
+ggplot(beers, aes(x = IBU, y = ABV, color = Category)) + 
+  geom_point(alpha = 0.5) + 
+  labs(x = "International Bitterness Units (IBU)", y = "Alcohol By Volume (ABV)", title = "ABV vs IBU by Beer Type") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+```
+
+#### Find one other useful inference from the data that you feel Budweiser may be able to find value in.  You must convince them why it is important and back up your conviction with appropriate statistical evidence.
+
+```{r}
+# Merge the datasets by the common ID fields
+merged_data <- merge(beers, breweries, by.x = "Brewery_id", by.y = "Brew_ID")
+
+# Remove rows with missing data
+merged_data <- na.omit(merged_data)
+
+# Clean the 'State' column in the merged data by trimming whitespace
+merged_data$State <- trimws(merged_data$State)
+
+# Define the market segments based on ABV and IBU
+merged_data <- merged_data %>%
+  mutate(
+    Segment = case_when(
+      ABV < 4 & IBU < 21 ~ "Light & Mild",
+      ABV >= 4 & ABV <= 6 & IBU >= 21 & IBU <= 50 ~ "Standard & Balanced",
+      ABV > 6 & IBU > 50 ~ "Strong & Bitter",
+      TRUE ~ "Other"
+    )
+  )
+
+# Selected states for the analysis
+selected_states <- c("KY", "OR")
+
+# Perform the segment analysis only for the selected states
+segment_analysis <- merged_data %>%
+  filter(State %in% selected_states) %>%
+  count(State, Segment) %>%
+  group_by(State) %>%
+  mutate(Percent = n / sum(n) * 100)
+
+# Print the segment analysis results
+print(segment_analysis)
+
+# Plot the segment distribution for the selected states
+ggplot(segment_analysis, aes(x = State, y = Percent, fill = Segment)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "State", y = "Percentage", title = "Beer Market Segmentation in KY and OR") +
+  theme_minimal()
+```
+
+From the data we have analyzed, we find that in Kentucky (KY), 28.6% of beers fall into the "Light & Mild" category, while a significant 71.4% are placed in the "Other" category. In Oregon (OR), the distribution is somewhat similar with 26.4% being "Light & Mild" and a substantial 73.6% categorized as "Other". This provides evidence of a potential preference for beers with higher ABV and IBU in these states, as the "Other" category likely encompasses "Standard & Balanced" and "Strong & Bitter" segments.​
+
+This trend aligns with broader market dynamics. The craft beer segment, known for its unique and often locally-inspired flavors, has seen considerable growth, now accounting for 24.6% of the $115 billion U.S. beer market1. Meanwhile, domestic beers, including Budweiser, made up around 69% of U.S. beer consumption in 20222. However, the total beer volume in the U.S. experienced a negative compound annual growth rate (CAGR) of 2% between 2017 and 20223.​
+
+The combination of these trends suggests a shifting landscape where consumers are increasingly attracted to craft beers. Thus, Budweiser's investment in local brands within KY and OR could be a strategic move to tap into this burgeoning market segment.​
+
+Looking towards the future, projections indicate an upward trajectory for the beer market. The U.S. beer market is forecasted to grow by 1.98% from 2024 to 20284, and the North American beer market is expected to reach USD 214 billion by 2029, growing at a CAGR of 4.39%5.​
+
+Drawing from these statistics and their implications, the evidence would suggest that Budweiser stands to gain by investing in local brands in states such as KY and OR. This approach would not only allow Budweiser to diversify its product portfolio but also position the brand to capitalize on the growing demand for more varied and locally-inspired flavors. In doing so, Budweiser could potentially increase its market share in the evolving U.S. beer industry.​
