@@ -1,0 +1,8 @@
+name: "Erika's Website"
+navbar:
+  title: "Navigation"
+  left:
+    - text: "About Me"
+      href: index.html
+    - text: "Beers Case Study"
+      href: CaseStudy1-Final.html
